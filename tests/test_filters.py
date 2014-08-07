@@ -110,23 +110,36 @@ class FilterTests(TestCase):
     def test_filtering(self):
         qs = mock.Mock(spec=['filter'])
         f = Filter()
-        result = f.filter(qs, 'value')
-        qs.filter.assert_called_once_with(None__exact='value')
-        self.assertNotEqual(qs, result)
+
+        with mock.patch('django_filters.filters.Q') as mockQclass:
+
+            result = f.filter(qs, 'value')
+            self.assertEqual(mockQclass.call_args_list, [mock.call(None__exact='value')])
+            qs.filter.assert_called_once()
+            self.assertNotEqual(qs, result)
 
     def test_filtering_exclude(self):
         qs = mock.Mock(spec=['filter', 'exclude'])
         f = Filter(exclude=True)
-        result = f.filter(qs, 'value')
-        qs.exclude.assert_called_once_with(None__exact='value')
-        self.assertNotEqual(qs, result)
+
+        with mock.patch('django_filters.filters.Q') as mockQclass:
+
+            result = f.filter(qs, 'value')
+            self.assertEqual(mockQclass.call_args_list, [mock.call(None__exact='value')])
+            qs.filter.assert_called_once()
+            self.assertNotEqual(qs, result)
 
     def test_filtering_uses_name(self):
         qs = mock.Mock(spec=['filter'])
         f = Filter(name='somefield')
-        f.filter(qs, 'value')
-        result = qs.filter.assert_called_once_with(somefield__exact='value')
-        self.assertNotEqual(qs, result)
+
+        with mock.patch('django_filters.filters.Q') as mockQclass:
+
+            result = f.filter(qs, 'value')
+            self.assertEqual(mockQclass.call_args_list, [mock.call(somefield__exact='value')])
+            qs.filter.assert_called_once()
+            self.assertNotEqual(qs, result)
+
 
     def test_filtering_skipped_with_blank_value(self):
         qs = mock.Mock()
@@ -145,9 +158,14 @@ class FilterTests(TestCase):
     def test_filtering_with_list_value(self):
         qs = mock.Mock(spec=['filter'])
         f = Filter(name='somefield', lookup_type=['some_lookup_type'])
-        result = f.filter(qs, Lookup('value', 'some_lookup_type'))
-        qs.filter.assert_called_once_with(somefield__some_lookup_type='value')
-        self.assertNotEqual(qs, result)
+
+        with mock.patch('django_filters.filters.Q') as mockQclass:
+
+            result = f.filter(qs, Lookup('value', 'some_lookup_type'))
+            self.assertEqual(mockQclass.call_args_list, [mock.call(somefield__some_lookup_type='value')])
+            qs.filter.assert_called_once()
+
+            self.assertNotEqual(qs, result)
 
     def test_filtering_skipped_with_list_value_with_blank(self):
         qs = mock.Mock()
@@ -341,12 +359,19 @@ class NumberFilterTests(TestCase):
     def test_filtering(self):
         qs = mock.Mock(spec=['filter'])
         f = NumberFilter()
-        f.filter(qs, 1)
-        qs.filter.assert_called_once_with(None__exact=1)
-        # Also test 0 as it once had a bug
-        qs.reset_mock()
-        f.filter(qs, 0)
-        qs.filter.assert_called_once_with(None__exact=0)
+
+        with mock.patch('django_filters.filters.Q') as mockQclass:
+
+            f.filter(qs, 1)
+            self.assertEqual(mockQclass.call_args_list, [mock.call(None__exact=1)])
+            qs.filter.assert_called_once()
+
+            # Also test 0 as it once had a bug
+            qs.reset_mock()
+            mockQclass.reset_mock()
+            f.filter(qs, 0)
+            self.assertEqual(mockQclass.call_args_list, [mock.call(None__exact=0)])
+            qs.filter.assert_called_once()
 
 
 class RangeFilterTests(TestCase):
@@ -360,8 +385,13 @@ class RangeFilterTests(TestCase):
         qs = mock.Mock(spec=['filter'])
         value = mock.Mock(start=20, stop=30)
         f = RangeFilter()
-        f.filter(qs, value)
-        qs.filter.assert_called_once_with(None__range=(20, 30))
+
+        with mock.patch('django_filters.filters.Q') as mockQclass:
+
+            f.filter(qs, value)
+
+            self.assertEqual(mockQclass.call_args_list, [mock.call(None__range=(20, 30))])
+            qs.filter.assert_called_once()
 
     def test_filtering_skipped_with_none_value(self):
         qs = mock.Mock(spec=['filter'])
@@ -373,8 +403,13 @@ class RangeFilterTests(TestCase):
         qs = mock.Mock()
         value = mock.Mock(start=20, stop=30)
         f = RangeFilter(lookup_type='gte')
-        f.filter(qs, value)
-        qs.filter.assert_called_once_with(None__range=(20, 30))
+
+        with mock.patch('django_filters.filters.Q') as mockQclass:
+
+            f.filter(qs, value)
+
+            self.assertEqual(mockQclass.call_args_list, [mock.call(None__range=(20, 30))])
+            qs.filter.assert_called_once()
 
 
 class DateRangeFilterTests(TestCase):
@@ -415,18 +450,20 @@ class DateRangeFilterTests(TestCase):
         with mock.patch('django_filters.filters.now') as mock_now:
             now_dt = mock_now.return_value
             f = DateRangeFilter()
-            f.filter(qs, '4')
-            qs.filter.assert_called_once_with(
-                None__year=now_dt.year)
+            with mock.patch('django_filters.filters.Q') as mockQclass:
+                f.filter(qs, '4')
+                mockQclass.assert_called_once_with(
+                    None__year=now_dt.year)
 
     def test_filtering_for_this_month(self):
         qs = mock.Mock(spec=['filter'])
         with mock.patch('django_filters.filters.now') as mock_now:
             now_dt = mock_now.return_value
             f = DateRangeFilter()
-            f.filter(qs, '3')
-            qs.filter.assert_called_once_with(
-                None__year=now_dt.year, None__month=now_dt.month)
+            with mock.patch('django_filters.filters.Q') as mockQclass:
+                f.filter(qs, '3')
+                mockQclass.assert_called_once_with(
+                    None__year=now_dt.year, None__month=now_dt.month)
 
     def test_filtering_for_7_days(self):
         qs = mock.Mock(spec=['filter'])
@@ -437,22 +474,26 @@ class DateRangeFilterTests(TestCase):
                     mock_dt1, mock_dt2 = mock.MagicMock(), mock.MagicMock()
                     mock_truncate.side_effect = [mock_dt1, mock_dt2]
                     f = DateRangeFilter()
-                    f.filter(qs, '2')
-                    self.assertEqual(mock_td.call_args_list,
-                        [mock.call(days=7), mock.call(days=1)])
-                    qs.filter.assert_called_once_with(
-                        None__lt=mock_dt2, None__gte=mock_dt1)
+                    with mock.patch('django_filters.filters.Q') as mockQclass:
+                        f.filter(qs, '2')
+                        self.assertEqual(mock_td.call_args_list,
+                            [mock.call(days=7), mock.call(days=1)])
+                        mockQclass.assert_called_once_with(
+                            None__lt=mock_dt2, None__gte=mock_dt1)
 
     def test_filtering_for_today(self):
         qs = mock.Mock(spec=['filter'])
         with mock.patch('django_filters.filters.now') as mock_now:
             now_dt = mock_now.return_value
             f = DateRangeFilter()
-            f.filter(qs, '1')
-            qs.filter.assert_called_once_with(
-                None__year=now_dt.year,
-                None__month=now_dt.month,
-                None__day=now_dt.day)
+
+            with mock.patch('django_filters.filters.Q') as mockQclass:
+                f.filter(qs, '1')
+
+                mockQclass.assert_called_once_with(
+                    None__year=now_dt.year,
+                    None__month=now_dt.month,
+                    None__day=now_dt.day)
 
 
 class AllValuesFilterTests(TestCase):

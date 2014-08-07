@@ -1002,9 +1002,14 @@ class MiscFilterSetTests(TestCase):
 
         qs = mock.MagicMock()
         f = F({'account': 'jdoe'}, queryset=qs)
-        result = f.qs
-        self.assertNotEqual(qs, result)
-        qs.all.return_value.filter.assert_called_with(username__exact='jdoe')
+
+        with mock.patch('django_filters.filters.Q') as mockQclass:
+            result = f.qs
+            self.assertNotEqual(qs, result)
+
+            self.assertEqual(mockQclass.call_args_list, [mock.call(username__exact='jdoe')])
+
+            qs.all.return_value.filter.assert_called_once()
 
     def test_filtering_with_multiple_filters(self):
         class F(FilterSet):

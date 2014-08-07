@@ -65,16 +65,22 @@ class Filter(object):
                     help_text=help_text, **self.extra)
         return self._field
 
-    def filter(self, qs, value):
+    def get_q(self, value):
         if isinstance(value, Lookup):
             lookup = six.text_type(value.lookup_type)
             value = value.value
         else:
             lookup = self.lookup_type
         if value in ([], (), {}, None, ''):
+            return None
+        return Q(**{'%s__%s' % (self.name, lookup): value})
+
+    def filter(self, qs, value):
+        q = self.get_q(value)
+        if q is None:
             return qs
         method = qs.exclude if self.exclude else qs.filter
-        qs = method(**{'%s__%s' % (self.name, lookup): value})
+        qs = method(q)
         if self.distinct:
             qs = qs.distinct()
         return qs
@@ -103,13 +109,19 @@ class MultipleChoiceFilter(Filter):
     """
     field_class = forms.MultipleChoiceField
 
-    def filter(self, qs, value):
+    def get_q(self, value):
         value = value or ()
         if len(value) == len(self.field.choices):
-            return qs
+            return None
         q = Q()
         for v in value:
             q |= Q(**{self.name: v})
+        return q
+
+    def filter(self, qs, value):
+        q = self.get_q(value)
+        if q is None:
+            return qs
         return qs.filter(q).distinct()
 
 
@@ -140,33 +152,32 @@ class NumberFilter(Filter):
 class RangeFilter(Filter):
     field_class = RangeField
 
-    def filter(self, qs, value):
+    def get_q(self, value):
         if value:
             lookup = '%s__range' % self.name
-            return qs.filter(**{lookup: (value.start, value.stop)})
-        return qs
-
+            return Q(**{lookup: (value.start, value.stop)})
+        return None
 
 _truncate = lambda dt: dt.replace(hour=0, minute=0, second=0)
 
 
 class DateRangeFilter(ChoiceFilter):
     options = {
-        '': (_('Any date'), lambda qs, name: qs.all()),
-        1: (_('Today'), lambda qs, name: qs.filter(**{
+        '': (_('Any date'), lambda name: None),
+        1: (_('Today'), lambda name: Q(**{
             '%s__year' % name: now().year,
             '%s__month' % name: now().month,
             '%s__day' % name: now().day
         })),
-        2: (_('Past 7 days'), lambda qs, name: qs.filter(**{
+        2: (_('Past 7 days'), lambda name: Q(**{
             '%s__gte' % name: _truncate(now() - timedelta(days=7)),
             '%s__lt' % name: _truncate(now() + timedelta(days=1)),
         })),
-        3: (_('This month'), lambda qs, name: qs.filter(**{
+        3: (_('This month'), lambda name: Q(**{
             '%s__year' % name: now().year,
             '%s__month' % name: now().month
         })),
-        4: (_('This year'), lambda qs, name: qs.filter(**{
+        4: (_('This year'), lambda name: Q(**{
             '%s__year' % name: now().year,
         })),
     }
@@ -176,12 +187,20 @@ class DateRangeFilter(ChoiceFilter):
             (key, value[0]) for key, value in six.iteritems(self.options)]
         super(DateRangeFilter, self).__init__(*args, **kwargs)
 
-    def filter(self, qs, value):
+    def get_q(self, value):
         try:
             value = int(value)
         except (ValueError, TypeError):
             value = ''
-        return self.options[value][1](qs, self.name)
+        return self.options[value][1](self.name)
+
+    def filter(self, qs, value):
+        q = self.get_q(value)
+
+        if q is None:
+            return qs.all()
+
+        return qs.filter(q)
 
 
 class AllValuesFilter(ChoiceFilter):
