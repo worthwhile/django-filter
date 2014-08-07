@@ -2,6 +2,7 @@ from __future__ import absolute_import
 from __future__ import unicode_literals
 
 from copy import deepcopy
+import operator
 
 from django import forms
 from django.core.validators import EMPTY_VALUES
@@ -28,6 +29,7 @@ except ImportError:  # pragma: nocover
 from .filters import (Filter, CharFilter, BooleanFilter,
     ChoiceFilter, DateFilter, DateTimeFilter, TimeFilter, ModelChoiceFilter,
     ModelMultipleChoiceFilter, NumberFilter)
+from .exceptions import StrictFilterException
 
 
 ORDER_BY_FIELD = 'o'
@@ -108,6 +110,9 @@ class FilterSetOptions(object):
         self.order_by = getattr(options, 'order_by', False)
 
         self.form = getattr(options, 'form', forms.Form)
+
+        self.and_together = getattr(options, 'and_together', None)
+        self.or_together = getattr(options, 'or_together', None)
 
 
 class FilterSetMetaclass(type):
@@ -260,15 +265,9 @@ class BaseFilterSet(object):
     def __getitem__(self, key):
         return self.qs[key]
 
-    def get_queryset(self):
-        valid = self.is_bound and self.form.is_valid()
-
-        if self.strict and self.is_bound and not valid:
-            return self.queryset.none()
-
-        # start with all the results and filter from there
-        qs = self.queryset.all()
-        for name, filter_ in six.iteritems(self.filters):
+    def get_filter_values(self, valid):
+        filter_values = {}
+        for name in self.filters.keys():
             value = None
             if valid:
                 value = self.form.cleaned_data[name]
@@ -280,13 +279,51 @@ class BaseFilterSet(object):
                     # for invalid values either:
                     # strictly "apply" filter yielding no results and get outta here
                     if self.strict:
-                        return self.queryset.none()
+                        raise StrictFilterException()
                     else:  # or ignore this filter altogether
                         pass
 
-            if value is not None:  # valid & clean data
-                qs = filter_.filter(qs, value)
+            filter_values[name] = value
 
+        return filter_values
+
+    def get_queryset(self):
+        valid = self.is_bound and self.form.is_valid()
+
+        if self.strict and self.is_bound and not valid:
+            raise StrictFilterException()
+
+        # start with all the results and filter from there
+        qs = self.queryset.all()
+
+        filter_values = self.get_filter_values(valid)
+
+        # defined a function so we don't repeat ourselves below
+        def do_and_or_together(qs, filter_tuples, operator):
+            for filter_tuple in filter_tuples or []:
+                q = models.Q()
+                for name in filter_tuple:
+                    # we are popping the value of of filter_values so that it wont be used again later on
+                    value = filter_values.pop(name)
+                    if value is not None:
+                        q = operator(q, self.filters[name].get_q(value))
+
+                qs = qs.filter(q)
+
+            return qs
+
+        # first, see if there are any and_together fields to take care of
+        qs = do_and_or_together(qs, self._meta.and_together, operator.and_)
+
+        # next, see if there are any or_together fields to take care of
+        qs = do_and_or_together(qs, self._meta.or_together, operator.or_)
+
+        # next, loop throught the rest of the fields (not used up in or_together or and_together)
+        for name, value in filter_values.iteritems():
+            if value is not None:  # valid & clean data
+                qs = self.filters[name].filter(qs, value)
+
+        # lastly, handle ordering
         if self._meta.order_by:
             order_field = self.form.fields[self.order_by_field]
             data = self.form[self.order_by_field].data
@@ -307,7 +344,10 @@ class BaseFilterSet(object):
     @property
     def qs(self):
         if not hasattr(self, '_qs'):
-            self._qs = self.get_queryset()
+            try:
+                self._qs = self.get_queryset()
+            except StrictFilterException:
+                self._qs = self.queryset.none()
         return self._qs
 
     def count(self):
