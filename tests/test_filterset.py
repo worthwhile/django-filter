@@ -582,3 +582,88 @@ class FilterSetOrderingTests(TestCase):
         f = F({'o': 'status'}, queryset=self.qs)
         self.assertQuerysetEqual(
             f.qs, ['carl', 'alex', 'aaron', 'jacob'], lambda o: o.username)
+
+
+class FilterSetAndOrTogetherTests(TestCase):
+
+    def setUp(self):
+        self.alex = User.objects.create(username='alex', status=1)
+        self.jacob = User.objects.create(username='jacob', status=2)
+        self.aaron = User.objects.create(username='aaron', status=2)
+        self.carl = User.objects.create(username='carl', status=0)
+        # user_ids = list(User.objects.all().values_list('pk', flat=True))
+        self.qs = User.objects.all().order_by('id')
+
+    def test_and_together(self):
+        class F(FilterSet):
+            class Meta:
+                model = User
+                fields = ['username', 'status']
+                and_together = (('username', 'status'),)
+
+        qs = mock.Mock(spec=['filter', 'all'])
+        f = F({'username': 'alex', 'status': 1}, queryset=qs)
+
+        with mock.patch('django_filters.filterset.Q') as mockQclass:
+            with mock.patch('django_filters.filters.Q') as mockQclass2:
+                mockQ1, mockQ2, mockQ3, mockQ4, mockQ5, mockQ6 = mock.MagicMock(), mock.MagicMock(), mock.MagicMock(), mock.MagicMock(), mock.MagicMock(), mock.MagicMock()
+                mockQclass.side_effect = [mockQ1, mockQ2, mockQ5]
+                mockQclass2.side_effect = [mockQ3, mockQ4, mockQ6]
+
+                new_qs = f.qs
+
+                self.assertEqual(mockQclass2.call_args_list,
+                         [mock.call(username__exact='alex'), mock.call(status__exact='1')])
+                mockQ1.__and__.assert_called_once_with(mockQ3)
+                qs.all.assert_called_once_with()
+                qs.all.return_value.filter.assert_called_once_with(mockQ1.__and__.return_value.__and__.return_value)
+
+    def test_and_together_results(self):
+        class F(FilterSet):
+            class Meta:
+                model = User
+                fields = ['username', 'status']
+                and_together = (('username', 'status'),)
+
+        f = F({'username': 'alex', 'status': 1}, queryset=self.qs)
+
+        qs = f.qs
+
+        self.assertEqual(len(qs), 1)
+
+    def test_or_together(self):
+        class F(FilterSet):
+            class Meta:
+                model = User
+                fields = ['username', 'status']
+                or_together = (('username', 'status'),)
+
+        qs = mock.Mock(spec=['filter', 'all'])
+        f = F({'username': 'alex', 'status': 1}, queryset=qs)
+
+        with mock.patch('django_filters.filterset.Q') as mockQclass:
+            with mock.patch('django_filters.filters.Q') as mockQclass2:
+                mockQ1, mockQ2, mockQ3, mockQ4, mockQ5, mockQ6 = mock.MagicMock(), mock.MagicMock(), mock.MagicMock(), mock.MagicMock(), mock.MagicMock(), mock.MagicMock()
+                mockQclass.side_effect = [mockQ1, mockQ2, mockQ5]
+                mockQclass2.side_effect = [mockQ3, mockQ4, mockQ6]
+
+                new_qs = f.qs
+
+                self.assertEqual(mockQclass2.call_args_list,
+                         [mock.call(username__exact='alex'), mock.call(status__exact='1')])
+                mockQ1.__or__.assert_called_once_with(mockQ3)
+                qs.all.assert_called_once_with()
+                qs.all.return_value.filter.assert_called_once_with(mockQ1.__or__.return_value.__or__.return_value)
+
+    def test_or_together_results(self):
+        class F(FilterSet):
+            class Meta:
+                model = User
+                fields = ['username', 'status']
+                or_together = (('username', 'status'),)
+
+        f = F({'username': 'alex', 'status': 2}, queryset=self.qs)
+
+        qs = f.qs
+
+        self.assertEqual(len(qs), 3)

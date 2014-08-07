@@ -7,6 +7,7 @@ import operator
 from django import forms
 from django.core.validators import EMPTY_VALUES
 from django.db import models
+from django.db.models import Q
 from django.db.models.fields import FieldDoesNotExist
 from django.db.models.related import RelatedObject
 from django.utils import six
@@ -299,14 +300,18 @@ class BaseFilterSet(object):
         filter_values = self.get_filter_values(valid)
 
         # defined a function so we don't repeat ourselves below
-        def do_and_or_together(qs, filter_tuples, operator):
-            for filter_tuple in filter_tuples or []:
-                q = models.Q()
+        def do_and_or_together(qs, filter_tuples, op):
+            pairs = filter_tuples or []
+            if len(pairs) > 0 and isinstance(pairs[0], six.string_types):
+                pairs = (pairs, )
+
+            for filter_tuple in pairs:
+                q = Q()
                 for name in filter_tuple:
                     # we are popping the value of of filter_values so that it wont be used again later on
                     value = filter_values.pop(name)
                     if value is not None:
-                        q = operator(q, self.filters[name].get_q(value))
+                        q = op(q, self.filters[name].get_q(value))
 
                 qs = qs.filter(q)
 
